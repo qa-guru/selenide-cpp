@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(selenide VERSION 0.1.4 LANGUAGES CXX)
+project(selenide VERSION 0.1.5 LANGUAGES CXX)
 
 find_package(CURL REQUIRED)
 find_package(nlohmann_json QUIET)
@@ -20,7 +20,8 @@ target_include_directories(selenide INTERFACE
 # The installed config resolves nlohmann_json separately from the fetched target.
 target_link_libraries(selenide INTERFACE
     CURL::libcurl
-    $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
+    $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>
+    $<$<PLATFORM_ID:Windows>:ws2_32>)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)

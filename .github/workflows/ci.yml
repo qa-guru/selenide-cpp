@@ -1,0 +1,19 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  example:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Ensure ChromeDriver
+        run: |
+          command -v chromedriver || brew install --cask chromedriver
+          xattr -d com.apple.quarantine "$(command -v chromedriver)" 2>/dev/null || true
+      - name: Build
+        run: cmake -B build && cmake --build build
+      - name: Run example e2e
+        run: ctest --test-dir build --output-on-failure

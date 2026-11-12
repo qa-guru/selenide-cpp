@@ -13,7 +13,11 @@
 #include <thread>
 #include <utility>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <winsock2.h>
+#include <windows.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
 #include <cerrno>
 #include <csignal>
 #include <cstring>
@@ -99,12 +103,19 @@ void retry(F&& f, const std::string& what,
 class Driver {
     std::string sid_;
     std::string url_ = Configuration::webdriverUrl;
-#ifndef _WIN32
+#ifdef _WIN32
+    HANDLE process_ = nullptr;
+#else
     pid_t pid_ = -1;
 #endif
 
     bool serviceRunning() noexcept {
-#ifndef _WIN32
+#ifdef _WIN32
+        if (!process_) return false;
+        if (WaitForSingleObject(process_, 0) == WAIT_TIMEOUT) return true;
+        CloseHandle(process_);
+        process_ = nullptr;
+#else
         if (pid_ <= 0) return false;
         pid_t state;
         do { state = waitpid(pid_, nullptr, WNOHANG); } while (state < 0 && errno == EINTR);
@@ -115,7 +126,13 @@ class Driver {
     }
 
     void stopService() noexcept {
-#ifndef _WIN32
+#ifdef _WIN32
+        if (!serviceRunning()) return;
+        TerminateProcess(process_, 0);
+        WaitForSingleObject(process_, 2000);
+        CloseHandle(process_);
+        process_ = nullptr;
+#else
         if (!serviceRunning()) return;
         kill(pid_, SIGTERM);
         for (int i = 0; i < 40 && serviceRunning(); ++i)
@@ -128,27 +145,74 @@ class Driver {
 #endif
     }
 
-    void startService() {
+    static std::string freePort() {
 #ifdef _WIN32
-        throw std::runtime_error("Set Configuration::webdriverUrl on Windows");
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
+            throw std::runtime_error("Cannot initialize Winsock");
+        SOCKET fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd == INVALID_SOCKET) {
+            WSACleanup();
+            throw std::runtime_error("Cannot allocate a ChromeDriver port");
+        }
 #else
         int fd = socket(AF_INET, SOCK_STREAM, 0);
         if (fd < 0) throw std::runtime_error("Cannot allocate a ChromeDriver port");
+#endif
         sockaddr_in address{};
         address.sin_family = AF_INET;
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+#ifdef _WIN32
+        int size = sizeof(address);
+#else
         socklen_t size = sizeof(address);
+#endif
         int failed = bind(fd, reinterpret_cast<sockaddr*>(&address), size) ||
                      getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size);
-        int error = errno;
+#ifdef _WIN32
+        closesocket(fd);
+        WSACleanup();
+#else
         close(fd);
+#endif
         if (failed)
-            throw std::runtime_error(std::string("Cannot allocate a ChromeDriver port: ") +
-                                     std::strerror(error));
+            throw std::runtime_error("Cannot allocate a ChromeDriver port");
+        return std::to_string(ntohs(address.sin_port));
+    }
 
-        auto port = std::to_string(ntohs(address.sin_port));
+    void startService() {
+        auto port = freePort();
         url_ = "http://127.0.0.1:" + port;
         std::string portArg = "--port=" + port;
+#ifdef _WIN32
+        std::string exe = Configuration::driverExecutable;
+        std::string cmd = (exe.find_first_of("/\\") != std::string::npos
+            ? "\"" + exe + "\"" : exe) + " " + portArg;
+        const char* sink = Configuration::driverLogFile.empty()
+            ? "NUL" : Configuration::driverLogFile.c_str();
+        SECURITY_ATTRIBUTES sa{};
+        sa.nLength = sizeof(sa);
+        sa.bInheritHandle = TRUE;
+        HANDLE out = CreateFileA(sink, GENERIC_WRITE, FILE_SHARE_READ, &sa,
+                                 OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (out == INVALID_HANDLE_VALUE)
+            throw std::runtime_error("Cannot open ChromeDriver log file '" +
+                                     std::string(sink) + "'");
+        STARTUPINFOA si{};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdOutput = si.hStdError = out;
+        PROCESS_INFORMATION pi{};
+        BOOL ok = CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, TRUE,
+                               CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+        CloseHandle(out);
+        if (!ok)
+            throw std::runtime_error("Cannot start ChromeDriver '" + exe +
+                "': error " + std::to_string(GetLastError()) +
+                ". Put it in PATH or set Configuration::driverExecutable.");
+        CloseHandle(pi.hThread);
+        process_ = pi.hProcess;
+#else
         char* args[] = {Configuration::driverExecutable.data(), portArg.data(), nullptr};
         const char* sink = Configuration::driverLogFile.empty()
             ? "/dev/null" : Configuration::driverLogFile.c_str();
@@ -157,7 +221,7 @@ class Driver {
         posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, sink,
                                          O_WRONLY | O_CREAT | O_APPEND, 0600);
         posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO);
-        error = posix_spawnp(&pid_, args[0], &actions, nullptr, args, ::environ);
+        int error = posix_spawnp(&pid_, args[0], &actions, nullptr, args, ::environ);
         posix_spawn_file_actions_destroy(&actions);
         if (error) {
             pid_ = -1;
@@ -165,6 +229,7 @@ class Driver {
                 Configuration::driverExecutable + "': " + std::strerror(error) +
                 ". Put it in PATH or set Configuration::driverExecutable.");
         }
+#endif
         retry([&] {
             if (!serviceRunning())
                 throw std::runtime_error("ChromeDriver exited before becoming ready");
@@ -172,7 +237,6 @@ class Driver {
                 (std::max)(1L, static_cast<long>(Configuration::timeout.count())))
                 .value("ready", false);
         }, "start ChromeDriver");
-#endif
     }
 public:
     Driver() {
@@ -328,6 +392,10 @@ inline void open(const std::string& url) {
 }
 inline json execute(const std::string& script, json args = json::array()) {
     return driver().cmd("POST", "/execute/sync",
+                        {{"script", script}, {"args", args}});
+}
+inline json executeAsync(const std::string& script, json args = json::array()) {
+    return driver().cmd("POST", "/execute/async",
                         {{"script", script}, {"args", args}});
 }
 

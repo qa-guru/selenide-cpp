@@ -6,11 +6,10 @@ Inspired by [Selenide](https://github.com/codeborne/selenide).
 
 ## Requirements
 
-CMake 3.20+, Clang/GCC with C++17 support, libcurl headers/library and Chrome.
-For local runs on macOS/Linux, install a matching ChromeDriver in `PATH` or set
+CMake 3.20+, a C++17 compiler, libcurl headers/library and Chrome.
+For local runs, install a matching ChromeDriver in `PATH` or set
 `Configuration::driverExecutable` to its path. Drivers are not downloaded.
 CMake finds [nlohmann/json](https://github.com/nlohmann/json) or fetches `v3.11.3`.
-On Windows, use an external driver via `Configuration::webdriverUrl`.
 
 ## Use in a project
 
@@ -18,7 +17,7 @@ On Windows, use an external driver via `Configuration::webdriverUrl`.
 include(FetchContent)
 FetchContent_Declare(selenide
     GIT_REPOSITORY https://github.com/qa-guru/selenide-cpp.git
-    GIT_TAG v0.1.4)
+    GIT_TAG v0.1.5)
 FetchContent_MakeAvailable(selenide)
 
 target_link_libraries(my_tests PRIVATE selenide::selenide)
@@ -53,7 +52,8 @@ Grid or Selenoid. Only the session is closed; the external server is never stopp
 ```cpp
 open(url);
 closeWebDriver();
-execute(script, args);       // returns nlohmann::json; args defaults to []
+execute(script, args);       // /execute/sync — returns nlohmann::json, args defaults to []
+executeAsync(script, args);  // /execute/async — script must call its last arg (callback)
 screenshot(path);            // viewport PNG
 
 $(css); $(css, i); $$(css);   // first match, indexed match, collection
