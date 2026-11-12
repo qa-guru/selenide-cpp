@@ -73,13 +73,20 @@ Configuration::pollingInterval = std::chrono::milliseconds{200};
 
 ## Run the example
 
-From this repository:
+First setup (from this repository):
 
 ```bash
-chromedriver --port=9515 &
-cmake -B build && cmake --build build
-ctest --test-dir build --output-on-failure
+chromedriver --port=9515 &  # start once; reuse if already running
+cmake -B build             # configure/generate build/, not compile
 ```
+
+Build and run after setup or after ordinary C++ edits:
+
+```bash
+cmake --build build && ctest --test-dir build --output-on-failure
+```
+
+In `--build build`, `--build` is the action; `build` is the directory name.
 
 The [example](examples/the_internet.cpp) covers login, logout, checkboxes and
 screenshots on [the-internet.herokuapp.com](https://the-internet.herokuapp.com).
