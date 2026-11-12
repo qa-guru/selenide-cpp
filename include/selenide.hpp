@@ -11,6 +11,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -106,11 +107,18 @@ public:
     }
 };
 
-// ленивая сессия: браузер открывается при первом обращении, закрывается на exit
-inline Driver& driver() {
-    static Driver d;
+// ленивая сессия: браузер открывается при первом обращении.
+// closeWebDriver() гасит её, следующее обращение откроет новую —
+// как Selenide.closeWebDriver() в @AfterEach.
+inline std::unique_ptr<Driver>& driverSlot() {
+    static std::unique_ptr<Driver> d;  // авто-закрытие на выходе из процесса
     return d;
 }
+inline Driver& driver() {
+    if (!driverSlot()) driverSlot() = std::make_unique<Driver>();
+    return *driverSlot();
+}
+inline void closeWebDriver() { driverSlot().reset(); }  // ~Driver -> DELETE /session
 
 // ---------- ядро Selenide: retry до таймаута ----------
 // bool-функция: повторяем пока не true; void-функция: пока не перестанет кидать
