@@ -16,7 +16,7 @@ using json = nlohmann::json;
 
 namespace selenide {
 
-static const char* EL_KEY = "element-6066-11e4-a52e-4f735466cecf";
+inline constexpr const char* EL_KEY = "element-6066-11e4-a52e-4f735466cecf";
 
 struct Configuration {
     inline static std::string webdriverUrl = "http://127.0.0.1:9515";
@@ -29,15 +29,15 @@ struct Configuration {
 };
 
 struct Http {
-    static size_t onWrite(char* p, size_t s, size_t n, std::string* out) {
-        out->append(p, s * n);
+    static size_t onWrite(char* p, size_t s, size_t n, void* out) {
+        static_cast<std::string*>(out)->append(p, s * n);
         return s * n;
     }
     static json call(const std::string& method, const std::string& url,
                      const json& body = nullptr) {
+        std::string resp, payload = body.is_null() ? "{}" : body.dump();
         CURL* c = curl_easy_init();
         if (!c) throw std::runtime_error("curl_easy_init failed");
-        std::string resp, payload = body.is_null() ? "{}" : body.dump();
         curl_slist* hdr = curl_slist_append(nullptr, "Content-Type: application/json");
         curl_easy_setopt(c, CURLOPT_URL, url.c_str());
         curl_easy_setopt(c, CURLOPT_CUSTOMREQUEST, method.c_str());
@@ -232,11 +232,12 @@ inline void screenshot(const std::string& file) {
     static const std::string T =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out;
-    int val = 0, bits = -8;
+    unsigned val = 0;
+    int bits = -8;
     for (char c : b64) {
         auto p = T.find(c);
         if (p == std::string::npos) continue;
-        val = (val << 6) + (int)p;
+        val = (val << 6) + static_cast<unsigned>(p);
         bits += 6;
         if (bits >= 0) { out.push_back(char((val >> bits) & 0xFF)); bits -= 8; }
     }
