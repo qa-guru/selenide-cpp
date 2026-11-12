@@ -47,37 +47,67 @@ $$("input[type=checkbox]").shouldHave(have::size(2));
   fetched automatically by CMake
 - `chromedriver` (or geckodriver — point `Configuration::webdriverUrl` at it)
 
-## Quick start
+## Use it as a dependency
+
+`selenide-cpp` is a proper CMake package — `selenide::selenide` INTERFACE
+target, header + transitive deps (`CURL`, `nlohmann_json`) resolved for you.
+
+**FetchContent — pin to a release tag (no install step):**
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(selenide
+    GIT_REPOSITORY https://github.com/qa-guru/selenide-cpp.git
+    GIT_TAG v0.1.0)
+FetchContent_MakeAvailable(selenide)
+
+target_link_libraries(my_tests PRIVATE selenide::selenide)
+```
+
+**find_package — after installing to a prefix:**
+
+```bash
+git clone https://github.com/qa-guru/selenide-cpp.git
+cmake -B build -S selenide-cpp && cmake --install build --prefix ~/.local
+```
+
+```cmake
+find_package(selenide REQUIRED)
+target_link_libraries(my_tests PRIVATE selenide::selenide)
+```
+
+## Quick start (framework dev loop)
 
 ```bash
 # chromedriver in another shell (any WebDriver-capable hub works)
 chromedriver --port=9515
 
 cmake -B build && cmake --build build
-ctest --test-dir build          # runs all three e2e binaries
+ctest --test-dir build          # runs the_internet e2e
 ```
 
 Or without CMake (macOS):
 
 ```bash
 brew install nlohmann-json
-clang++ -std=c++17 -Iinclude tests/the_internet.cpp -lcurl -o the_internet
+clang++ -std=c++17 -Iinclude examples/the_internet.cpp -lcurl -o the_internet
 ./the_internet
 ```
 
 `$`/`$$` are legal identifiers in clang/gcc; on clang pass
 `-Wno-dollar-in-identifier-extension` to silence the warning (CMake does it).
 
-## Tests
+## Examples & tools
 
 | Binary | Target | What it covers |
 |--------|--------|----------------|
 | `the_internet` | [the-internet.herokuapp.com](https://the-internet.herokuapp.com) | form auth, flash asserts, checkbox collection, `screenshot()` |
-| `qaguru` | [new-app.qa.guru](https://new-app.qa.guru) | client validation, register→auto-login, logout, `window.confirm` via alert API, negative login |
-| `multistack` | [autotests.ai/stack/…-react](https://autotests.ai/stack/backend-java-spring/frontend-typescript-react) | mirrors the canonical Java suite: register validation incl. duplicate user, welcome panel, logout, delete account, `localStorage` token check via `execute()` |
 | `dom_probe` | any | dumps every `[data-testid]` on a page — the tool used to discover real selectors before writing assertions |
 
-All tests create throwaway accounts and delete them inside the run.
+Real project tests live in the consumer repo:
+[qa-guru/selenide-cpp-multistack-app-tests](https://github.com/qa-guru/selenide-cpp-multistack-app-tests) —
+register/login/logout/delete-account e2e against the Multistack demo stands,
+consuming this library via `FetchContent`.
 
 ## API cheat sheet
 

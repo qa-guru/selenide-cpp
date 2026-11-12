@@ -1,0 +1,17 @@
+@PACKAGE_INIT@
+
+# selenide is header-only; its transitive deps resolve here so that
+# target_link_libraries(app selenide::selenide) is self-contained.
+include(CMakeFindDependencyMacro)
+find_dependency(CURL)
+find_dependency(nlohmann_json)
+
+include("${CMAKE_CURRENT_LIST_DIR}/selenideTargets.cmake")
+
+# nlohmann_json is linked via BUILD_INTERFACE in the build tree (a fetched
+# dependency cannot join the export set), so the exported target carries only
+# CURL — bind the header dep on the imported target here instead.
+if(TARGET selenide::selenide AND TARGET nlohmann_json::nlohmann_json)
+    set_property(TARGET selenide::selenide APPEND PROPERTY
+        INTERFACE_LINK_LIBRARIES nlohmann_json::nlohmann_json)
+endif()
