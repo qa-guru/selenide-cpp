@@ -34,7 +34,8 @@ $$("input[type=checkbox]").shouldHave(have::size(2));
 - **No stale references** — the element id is re-resolved on each call;
   `StaleElementReferenceException` cannot happen.
 - **Auto teardown** — the driver session is a lazy singleton closed by its
-  destructor when the process exits.
+  destructor when the process exits; call `closeWebDriver()` to close it early
+  (the next `open`/`$` lazily starts a fresh session).
 - **Fluent conditions** — `be::visible/hidden/enabled/checked/exist`,
   `have::text/exactText/attr/value`; collections get
   `have::size/sizeGreaterThan/texts`.
@@ -113,6 +114,7 @@ consuming this library via `FetchContent`.
 ```cpp
 // browser
 open(url)                        // GET /session/{id}/url
+closeWebDriver()                 // DELETE /session — next call opens a fresh browser
 title()                          // page title
 execute(script, args)            // /execute/sync — JS, returns nlohmann::json
 screenshot(path)                 // viewport PNG
