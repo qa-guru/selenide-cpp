@@ -97,16 +97,15 @@ clang++ -std=c++17 -Iinclude examples/the_internet.cpp -lcurl -o the_internet
 `$`/`$$` are legal identifiers in clang/gcc; on clang pass
 `-Wno-dollar-in-identifier-extension` to silence the warning (CMake does it).
 
-## Examples & tools
+## Example
 
 | Binary | Target | What it covers |
 |--------|--------|----------------|
 | `the_internet` | [the-internet.herokuapp.com](https://the-internet.herokuapp.com) | form auth, flash asserts, checkbox collection, `screenshot()` |
-| `dom_probe` | any | dumps every `[data-testid]` on a page — the tool used to discover real selectors before writing assertions |
 
 Real project tests live in the consumer repo:
 [qa-guru/selenide-cpp-multistack-app-tests](https://github.com/qa-guru/selenide-cpp-multistack-app-tests) —
-register/login/logout/delete-account e2e against the Multistack demo stands,
+Google Test login e2e against the Multistack prod deployment,
 consuming this library via `FetchContent`.
 
 ## API cheat sheet

@@ -50,26 +50,20 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/selenideConfigVersion.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/selenide)
 
-# --- examples + tools: only for the framework's own dev loop -------------------
+# --- example: only for the framework's own dev loop ----------------------------
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    option(SELENIDE_BUILD_EXAMPLES "Build e2e examples (need chromedriver)" ON)
+    option(SELENIDE_BUILD_EXAMPLES "Build e2e example (needs chromedriver)" ON)
     if(SELENIDE_BUILD_EXAMPLES)
         enable_testing()
-        foreach(t the_internet dom_probe)
-            if(t STREQUAL "dom_probe")
-                add_executable(${t} tools/probe.cpp)
-            else()
-                add_executable(${t} examples/${t}.cpp)
-            endif()
-            target_link_libraries(${t} PRIVATE selenide::selenide)
-            if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-                target_compile_options(${t} PRIVATE -Wall -Wextra)
-            endif()
-            if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-                # $ / $$ factories are legal identifiers, just noisy on clang
-                target_compile_options(${t} PRIVATE -Wno-dollar-in-identifier-extension)
-            endif()
-        endforeach()
+        add_executable(the_internet examples/the_internet.cpp)
+        target_link_libraries(the_internet PRIVATE selenide::selenide)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+            target_compile_options(the_internet PRIVATE -Wall -Wextra)
+        endif()
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            # $ / $$ factories are legal identifiers, just noisy on clang
+            target_compile_options(the_internet PRIVATE -Wno-dollar-in-identifier-extension)
+        endif()
         add_test(NAME the_internet COMMAND the_internet)
         set_tests_properties(the_internet PROPERTIES LABELS live TIMEOUT 120)
     endif()
