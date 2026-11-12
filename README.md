@@ -18,7 +18,7 @@ On Windows, use an external driver via `Configuration::webdriverUrl`.
 include(FetchContent)
 FetchContent_Declare(selenide
     GIT_REPOSITORY https://github.com/qa-guru/selenide-cpp.git
-    GIT_TAG v0.1.3)
+    GIT_TAG v0.1.4)
 FetchContent_MakeAvailable(selenide)
 
 target_link_libraries(my_tests PRIVATE selenide::selenide)
@@ -72,6 +72,7 @@ until `Configuration::timeout`, then throw `std::runtime_error`. Defaults:
 ```cpp
 Configuration::webdriverUrl = "";  // managed local ChromeDriver
 Configuration::driverExecutable = "chromedriver";  // PATH name or executable path
+Configuration::driverLogFile = "";                 // discard output; path = keep it
 Configuration::browser = "chrome";
 Configuration::headless = true;
 Configuration::incognito = true;  // prevent autofill UI from intercepting input

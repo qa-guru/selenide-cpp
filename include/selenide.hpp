@@ -17,6 +17,7 @@
 #include <cerrno>
 #include <csignal>
 #include <cstring>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <spawn.h>
 #include <sys/socket.h>
@@ -34,6 +35,7 @@ inline constexpr const char* EL_KEY = "element-6066-11e4-a52e-4f735466cecf";
 struct Configuration {
     inline static std::string webdriverUrl;
     inline static std::string driverExecutable = "chromedriver";
+    inline static std::string driverLogFile;  // empty = discard driver output
     inline static std::string browser = "chrome";
     inline static bool headless = true;
     // Prevent browser-owned autofill UI from intercepting auth-form key events.
@@ -59,6 +61,7 @@ struct Http {
         curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, onWrite);
         curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
         curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, timeoutMs);
+        curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, 5000L);
         if (method == "POST")
             curl_easy_setopt(c, CURLOPT_POSTFIELDS, payload.c_str());
         CURLcode rc = curl_easy_perform(c);
@@ -115,14 +118,12 @@ class Driver {
 #ifndef _WIN32
         if (!serviceRunning()) return;
         kill(pid_, SIGTERM);
-        try {
-            retry([&] { return !serviceRunning(); }, "stop ChromeDriver");
-        } catch (...) {
-            if (serviceRunning()) {
-                kill(pid_, SIGKILL);
-                while (waitpid(pid_, nullptr, 0) < 0 && errno == EINTR) {}
-                pid_ = -1;
-            }
+        for (int i = 0; i < 40 && serviceRunning(); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds{50});
+        if (serviceRunning()) {
+            kill(pid_, SIGKILL);
+            while (waitpid(pid_, nullptr, 0) < 0 && errno == EINTR) {}
+            pid_ = -1;
         }
 #endif
     }
@@ -149,7 +150,15 @@ class Driver {
         url_ = "http://127.0.0.1:" + port;
         std::string portArg = "--port=" + port;
         char* args[] = {Configuration::driverExecutable.data(), portArg.data(), nullptr};
-        error = posix_spawnp(&pid_, args[0], nullptr, nullptr, args, ::environ);
+        const char* sink = Configuration::driverLogFile.empty()
+            ? "/dev/null" : Configuration::driverLogFile.c_str();
+        posix_spawn_file_actions_t actions;
+        posix_spawn_file_actions_init(&actions);
+        posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, sink,
+                                         O_WRONLY | O_CREAT | O_APPEND, 0600);
+        posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO);
+        error = posix_spawnp(&pid_, args[0], &actions, nullptr, args, ::environ);
+        posix_spawn_file_actions_destroy(&actions);
         if (error) {
             pid_ = -1;
             throw std::runtime_error("Cannot start ChromeDriver '" +
