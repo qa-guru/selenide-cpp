@@ -1,14 +1,16 @@
 # selenide-cpp
 
 Selenide-style C++17 UI testing in one header over W3C WebDriver:
-lazy CSS locators, retrying element actions/assertions and automatic teardown.
+lazy CSS locators, retrying actions/assertions and managed local ChromeDriver.
 Inspired by [Selenide](https://github.com/codeborne/selenide).
 
 ## Requirements
 
-CMake 3.20+, Clang/GCC with C++17 support, libcurl headers/library, Chrome and a
-matching ChromeDriver. CMake finds [nlohmann/json](https://github.com/nlohmann/json)
-or fetches `v3.11.3`.
+CMake 3.20+, Clang/GCC with C++17 support, libcurl headers/library and Chrome.
+For local runs on macOS/Linux, install a matching ChromeDriver in `PATH` or set
+`Configuration::driverExecutable` to its path. Drivers are not downloaded.
+CMake finds [nlohmann/json](https://github.com/nlohmann/json) or fetches `v3.11.3`.
+On Windows, use an external driver via `Configuration::webdriverUrl`.
 
 ## Use in a project
 
@@ -16,7 +18,7 @@ or fetches `v3.11.3`.
 include(FetchContent)
 FetchContent_Declare(selenide
     GIT_REPOSITORY https://github.com/qa-guru/selenide-cpp.git
-    GIT_TAG v0.1.2)
+    GIT_TAG v0.1.3)
 FetchContent_MakeAvailable(selenide)
 
 target_link_libraries(my_tests PRIVATE selenide::selenide)
@@ -39,9 +41,14 @@ int main() {
 
 ## API
 
-Indices are zero-based. Locators do not start a browser; browser commands create
-a session lazily. `closeWebDriver()` closes it; the next browser command starts
-a new one. Sessions also close on process exit.
+Indices are zero-based. Locators do not start a browser. With an empty
+`Configuration::webdriverUrl`, the first browser command starts ChromeDriver
+on a free local port and creates a session. `closeWebDriver()` closes the session
+and stops that owned process; the next command starts a new one. Cleanup also
+runs on normal process exit and when session creation fails.
+
+Set `webdriverUrl` before the first browser command to use an existing driver,
+Grid or Selenoid. Only the session is closed; the external server is never stopped.
 
 ```cpp
 open(url);
@@ -63,7 +70,8 @@ Element IDs are re-resolved per command. Element actions and assertions retry
 until `Configuration::timeout`, then throw `std::runtime_error`. Defaults:
 
 ```cpp
-Configuration::webdriverUrl = "http://127.0.0.1:9515";
+Configuration::webdriverUrl = "";  // managed local ChromeDriver
+Configuration::driverExecutable = "chromedriver";  // PATH name or executable path
 Configuration::browser = "chrome";
 Configuration::headless = true;
 Configuration::incognito = true;  // prevent autofill UI from intercepting input
@@ -76,7 +84,6 @@ Configuration::pollingInterval = std::chrono::milliseconds{200};
 First setup (from this repository):
 
 ```bash
-chromedriver --port=9515 &  # start once; reuse if already running
 cmake -B build             # configure/generate build/, not compile
 ```
 

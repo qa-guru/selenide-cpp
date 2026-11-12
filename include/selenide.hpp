@@ -2,6 +2,7 @@
 
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <functional>
@@ -12,6 +13,18 @@
 #include <thread>
 #include <utility>
 
+#ifndef _WIN32
+#include <cerrno>
+#include <csignal>
+#include <cstring>
+#include <netinet/in.h>
+#include <spawn.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <unistd.h>
+extern char** environ;
+#endif
+
 using json = nlohmann::json;
 
 namespace selenide {
@@ -19,7 +32,8 @@ namespace selenide {
 inline constexpr const char* EL_KEY = "element-6066-11e4-a52e-4f735466cecf";
 
 struct Configuration {
-    inline static std::string webdriverUrl = "http://127.0.0.1:9515";
+    inline static std::string webdriverUrl;
+    inline static std::string driverExecutable = "chromedriver";
     inline static std::string browser = "chrome";
     inline static bool headless = true;
     // Prevent browser-owned autofill UI from intercepting auth-form key events.
@@ -34,7 +48,7 @@ struct Http {
         return s * n;
     }
     static json call(const std::string& method, const std::string& url,
-                     const json& body = nullptr) {
+                     const json& body = nullptr, long timeoutMs = 0) {
         std::string resp, payload = body.is_null() ? "{}" : body.dump();
         CURL* c = curl_easy_init();
         if (!c) throw std::runtime_error("curl_easy_init failed");
@@ -44,6 +58,7 @@ struct Http {
         curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
         curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, onWrite);
         curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
+        curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, timeoutMs);
         if (method == "POST")
             curl_easy_setopt(c, CURLOPT_POSTFIELDS, payload.c_str());
         CURLcode rc = curl_easy_perform(c);
@@ -59,47 +74,6 @@ struct Http {
         return v;
     }
 };
-
-class Driver {
-    std::string sid_;
-public:
-    Driver() {
-        json args = {"--window-size=1440,900"};
-        if (Configuration::headless)  args.push_back("--headless=new");
-        if (Configuration::incognito) args.push_back("--incognito");
-        json prefs = {
-            {"credentials_enable_service", false},
-            {"profile.password_manager_enabled", false}
-        };
-        auto v = Http::call("POST", Configuration::webdriverUrl + "/session", {
-            {"capabilities", {{"alwaysMatch", {
-                {"browserName", Configuration::browser},
-                {"goog:chromeOptions", {{"args", args}, {"prefs", prefs}}}
-            }}}}
-        });
-        sid_ = v.at("sessionId").get<std::string>();
-    }
-    ~Driver() {
-        try { Http::call("DELETE", Configuration::webdriverUrl + "/session/" + sid_); }
-        catch (...) {}
-    }
-    Driver(const Driver&) = delete;
-    Driver& operator=(const Driver&) = delete;
-    json cmd(const std::string& m, const std::string& p, const json& b = nullptr) {
-        return Http::call(m, Configuration::webdriverUrl + "/session/" + sid_ + p, b);
-    }
-};
-
-// A lazy session, reset by closeWebDriver() and closed on process exit.
-inline std::unique_ptr<Driver>& driverSlot() {
-    static std::unique_ptr<Driver> d;
-    return d;
-}
-inline Driver& driver() {
-    if (!driverSlot()) driverSlot() = std::make_unique<Driver>();
-    return *driverSlot();
-}
-inline void closeWebDriver() { driverSlot().reset(); }
 
 template <typename F>
 void retry(F&& f, const std::string& what,
@@ -118,6 +92,127 @@ void retry(F&& f, const std::string& what,
         std::this_thread::sleep_for(Configuration::pollingInterval);
     }
 }
+
+class Driver {
+    std::string sid_;
+    std::string url_ = Configuration::webdriverUrl;
+#ifndef _WIN32
+    pid_t pid_ = -1;
+#endif
+
+    bool serviceRunning() noexcept {
+#ifndef _WIN32
+        if (pid_ <= 0) return false;
+        pid_t state;
+        do { state = waitpid(pid_, nullptr, WNOHANG); } while (state < 0 && errno == EINTR);
+        if (state == 0) return true;
+        pid_ = -1;
+#endif
+        return false;
+    }
+
+    void stopService() noexcept {
+#ifndef _WIN32
+        if (!serviceRunning()) return;
+        kill(pid_, SIGTERM);
+        try {
+            retry([&] { return !serviceRunning(); }, "stop ChromeDriver");
+        } catch (...) {
+            if (serviceRunning()) {
+                kill(pid_, SIGKILL);
+                while (waitpid(pid_, nullptr, 0) < 0 && errno == EINTR) {}
+                pid_ = -1;
+            }
+        }
+#endif
+    }
+
+    void startService() {
+#ifdef _WIN32
+        throw std::runtime_error("Set Configuration::webdriverUrl on Windows");
+#else
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd < 0) throw std::runtime_error("Cannot allocate a ChromeDriver port");
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        socklen_t size = sizeof(address);
+        int failed = bind(fd, reinterpret_cast<sockaddr*>(&address), size) ||
+                     getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size);
+        int error = errno;
+        close(fd);
+        if (failed)
+            throw std::runtime_error(std::string("Cannot allocate a ChromeDriver port: ") +
+                                     std::strerror(error));
+
+        auto port = std::to_string(ntohs(address.sin_port));
+        url_ = "http://127.0.0.1:" + port;
+        std::string portArg = "--port=" + port;
+        char* args[] = {Configuration::driverExecutable.data(), portArg.data(), nullptr};
+        error = posix_spawnp(&pid_, args[0], nullptr, nullptr, args, ::environ);
+        if (error) {
+            pid_ = -1;
+            throw std::runtime_error("Cannot start ChromeDriver '" +
+                Configuration::driverExecutable + "': " + std::strerror(error) +
+                ". Put it in PATH or set Configuration::driverExecutable.");
+        }
+        retry([&] {
+            if (!serviceRunning())
+                throw std::runtime_error("ChromeDriver exited before becoming ready");
+            return Http::call("GET", url_ + "/status", nullptr,
+                (std::max)(1L, static_cast<long>(Configuration::timeout.count())))
+                .value("ready", false);
+        }, "start ChromeDriver");
+#endif
+    }
+public:
+    Driver() {
+        try {
+            if (url_.empty()) startService();
+            json args = {"--window-size=1440,900"};
+            if (Configuration::headless)  args.push_back("--headless=new");
+            if (Configuration::incognito) args.push_back("--incognito");
+            json prefs = {
+                {"credentials_enable_service", false},
+                {"profile.password_manager_enabled", false}
+            };
+            auto v = Http::call("POST", url_ + "/session", {
+                {"capabilities", {{"alwaysMatch", {
+                    {"browserName", Configuration::browser},
+                    {"goog:chromeOptions", {{"args", args}, {"prefs", prefs}}}
+                }}}}
+            });
+            sid_ = v.at("sessionId").get<std::string>();
+        } catch (...) {
+            stopService();
+            throw;
+        }
+    }
+    ~Driver() {
+        try {
+            Http::call("DELETE", url_ + "/session/" + sid_, nullptr,
+                (std::max)(1L, static_cast<long>(Configuration::timeout.count())));
+        }
+        catch (...) {}
+        stopService();
+    }
+    Driver(const Driver&) = delete;
+    Driver& operator=(const Driver&) = delete;
+    json cmd(const std::string& m, const std::string& p, const json& b = nullptr) {
+        return Http::call(m, url_ + "/session/" + sid_ + p, b);
+    }
+};
+
+// A lazy session, reset by closeWebDriver() and closed on process exit.
+inline std::unique_ptr<Driver>& driverSlot() {
+    static std::unique_ptr<Driver> d;
+    return d;
+}
+inline Driver& driver() {
+    if (!driverSlot()) driverSlot() = std::make_unique<Driver>();
+    return *driverSlot();
+}
+inline void closeWebDriver() { driverSlot().reset(); }
 
 class El;
 struct Condition {

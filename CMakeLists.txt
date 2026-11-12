@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(selenide VERSION 0.1.0 LANGUAGES CXX)
+project(selenide VERSION 0.1.3 LANGUAGES CXX)
 
 find_package(CURL REQUIRED)
 find_package(nlohmann_json QUIET)
