@@ -1,0 +1,142 @@
+# selenide-cpp
+
+Selenide-style UI testing in modern C++ — a single header over the W3C
+WebDriver protocol. Inspired by [codeborne/selenide](https://github.com/codeborne/selenide).
+
+Selenium has no official C++ bindings, but WebDriver is just HTTP. This is a
+~350-line proof that the parts people actually love about Selenide —
+lazy locators, fluent assertions, automatic waiting, automatic teardown —
+fit in one `.hpp`.
+
+```cpp
+#include "selenide.hpp"
+using namespace selenide;
+
+open("https://example.com/login");
+
+$("#username").setValue("tomsmith");
+$("#password").setValue("SuperSecretPassword!");
+$("button[type=submit]").click();
+
+$(".flash.success")
+    .shouldBe(be::visible)
+    .shouldHave(have::text("You logged into a secure area"));
+
+$$("input[type=checkbox]").shouldHave(have::size(2));
+```
+
+## Why it feels like Selenide
+
+- **Lazy locators** — `$()`, `$$()`, `el.find()`, `el.get(i)` do not touch the
+  browser until an action or assertion.
+- **Automatic waiting** — every action and every `should*` retries until
+  `Configuration::timeout` (4 s default). No sleeps, no explicit waits.
+- **No stale references** — the element id is re-resolved on each call;
+  `StaleElementReferenceException` cannot happen.
+- **Auto teardown** — the driver session is a lazy singleton closed by its
+  destructor when the process exits.
+- **Fluent conditions** — `be::visible/hidden/enabled/checked/exist`,
+  `have::text/exactText/attr/value`; collections get
+  `have::size/sizeGreaterThan/texts`.
+
+## Dependencies
+
+- C++17 compiler
+- `libcurl` (system on macOS/Linux)
+- [`nlohmann/json`](https://github.com/nlohmann/json) — `find_package` or
+  fetched automatically by CMake
+- `chromedriver` (or geckodriver — point `Configuration::webdriverUrl` at it)
+
+## Quick start
+
+```bash
+# chromedriver in another shell (any WebDriver-capable hub works)
+chromedriver --port=9515
+
+cmake -B build && cmake --build build
+ctest --test-dir build          # runs all three e2e binaries
+```
+
+Or without CMake (macOS):
+
+```bash
+brew install nlohmann-json
+clang++ -std=c++17 -Iinclude tests/the_internet.cpp -lcurl -o the_internet
+./the_internet
+```
+
+`$`/`$$` are legal identifiers in clang/gcc; on clang pass
+`-Wno-dollar-in-identifier-extension` to silence the warning (CMake does it).
+
+## Tests
+
+| Binary | Target | What it covers |
+|--------|--------|----------------|
+| `the_internet` | [the-internet.herokuapp.com](https://the-internet.herokuapp.com) | form auth, flash asserts, checkbox collection, `screenshot()` |
+| `qaguru` | [new-app.qa.guru](https://new-app.qa.guru) | client validation, register→auto-login, logout, `window.confirm` via alert API, negative login |
+| `multistack` | [autotests.ai/stack/…-react](https://autotests.ai/stack/backend-java-spring/frontend-typescript-react) | mirrors the canonical Java suite: register validation incl. duplicate user, welcome panel, logout, delete account, `localStorage` token check via `execute()` |
+| `dom_probe` | any | dumps every `[data-testid]` on a page — the tool used to discover real selectors before writing assertions |
+
+All tests create throwaway accounts and delete them inside the run.
+
+## API cheat sheet
+
+```cpp
+// browser
+open(url)                        // GET /session/{id}/url
+title()                          // page title
+execute(script, args)            // /execute/sync — JS, returns nlohmann::json
+screenshot(path)                 // viewport PNG
+alertText() / acceptAlert() / dismissAlert()
+
+// elements
+$(css)  $(css, i)  $$(css)
+el.find(css)  el.get(i)
+el.click()  el.setValue(v)       // clear + sendKeys
+el.text()  el.attr(name)  el.displayed()  el.enabled()  el.selected()  el.exists()
+
+// assertions — all retry until Configuration::timeout
+el.shouldBe(c) / shouldHave(c) / shouldNotBe(c) / shouldNotHave(c)
+els.shouldHave(colCondition)
+
+// conditions
+be::exist visible hidden enabled checked
+have::text(t) exactText(t) attr(n, v) value(v)
+have::size(n) sizeGreaterThan(n) texts({...})
+
+// configuration (static fields, like Selenide's Configuration)
+selenide::Configuration::webdriverUrl = "http://127.0.0.1:9515";
+selenide::Configuration::headless = true;
+selenide::Configuration::timeout = std::chrono::milliseconds{4000};
+selenide::Configuration::pollingInterval = std::chrono::milliseconds{200};
+```
+
+## How it maps to WebDriver
+
+| Selenide-style call | W3C WebDriver |
+|---|---|
+| `$(css)` → resolve | `POST /session/{id}/element` (css selector) |
+| `$$(css)` / `.get(i)` | `POST .../elements` |
+| `.find(css)` | `POST /element/{id}/element` |
+| `.click()` | `POST /element/{id}/click` |
+| `.setValue()` | `POST /element/{id}/clear` + `.../value` |
+| `.text()` | `GET /element/{id}/text` |
+| `displayed/enabled/selected` | `GET /element/{id}/displayed|enabled|selected` |
+| `screenshot()` | `GET /screenshot` |
+| `execute()` | `POST /execute/sync` |
+| alerts | `GET /alert/text`, `POST /alert/accept|dismiss` |
+
+`unhandledPromptBehavior: ignore` is set on session creation, so
+`window.confirm` stays open until you accept/dismiss it explicitly.
+
+## Deliberate limits (vs real Selenide)
+
+- CSS selectors only (add more `using` strategies if you need xpath)
+- no page-load / download waiting helpers, no iframe or window switching
+- no Page Objects, no proxy/CDP network interception
+- runner integration is just `main()` — wrap `should*` failures in your
+  framework's `ASSERT_*` if you want per-test reports
+
+## License
+
+MIT — see [LICENSE](LICENSE).
