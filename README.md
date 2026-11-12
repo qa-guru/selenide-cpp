@@ -137,6 +137,7 @@ have::size(n) sizeGreaterThan(n) texts({...})
 // configuration (static fields, like Selenide's Configuration)
 selenide::Configuration::webdriverUrl = "http://127.0.0.1:9515";
 selenide::Configuration::headless = true;
+selenide::Configuration::incognito = true;  // clean profile, no autofill UI
 selenide::Configuration::timeout = std::chrono::milliseconds{4000};
 selenide::Configuration::pollingInterval = std::chrono::milliseconds{200};
 ```

@@ -29,6 +29,10 @@ struct Configuration {
     inline static std::string webdriverUrl = "http://127.0.0.1:9515";
     inline static std::string browser = "chrome";
     inline static bool headless = true;
+    // Clean-profile session without Chrome's password-manager/autofill UI.
+    // Autofill dropdowns are browser chrome (not DOM): they can silently eat
+    // key events on auth forms after a credential submit — incognito kills them.
+    inline static bool incognito = true;
     inline static std::chrono::milliseconds timeout{4000};
     inline static std::chrono::milliseconds pollingInterval{200};
 };
@@ -76,12 +80,17 @@ class Driver {
 public:
     Driver() {
         json args = {"--window-size=1440,900"};
-        if (Configuration::headless) args.push_back("--headless=new");
+        if (Configuration::headless)  args.push_back("--headless=new");
+        if (Configuration::incognito) args.push_back("--incognito");
+        json prefs = {
+            {"credentials_enable_service", false},
+            {"profile.password_manager_enabled", false}
+        };
         auto v = Http::call("POST", Configuration::webdriverUrl + "/session", {
             {"capabilities", {{"alwaysMatch", {
                 {"browserName", Configuration::browser},
                 {"unhandledPromptBehavior", "ignore"},
-                {"goog:chromeOptions", {{"args", args}}}
+                {"goog:chromeOptions", {{"args", args}, {"prefs", prefs}}}
             }}}}
         });
         sid_ = v.at("sessionId").get<std::string>();
