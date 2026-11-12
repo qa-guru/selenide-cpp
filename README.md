@@ -4,7 +4,7 @@ Selenide-style UI testing in modern C++ — a single header over the W3C
 WebDriver protocol. Inspired by [codeborne/selenide](https://github.com/codeborne/selenide).
 
 Selenium has no official C++ bindings, but WebDriver is just HTTP. This is a
-~350-line proof that the parts people actually love about Selenide —
+small proof that the parts people actually love about Selenide —
 lazy locators, fluent assertions, automatic waiting, automatic teardown —
 fit in one `.hpp`.
 
@@ -27,18 +27,17 @@ $$("input[type=checkbox]").shouldHave(have::size(2));
 
 ## Why it feels like Selenide
 
-- **Lazy locators** — `$()`, `$$()`, `el.find()`, `el.get(i)` do not touch the
+- **Lazy locators** — `$()`, `$(css, i)`, `$$()` do not touch the
   browser until an action or assertion.
 - **Automatic waiting** — every action and every `should*` retries until
   `Configuration::timeout` (4 s default). No sleeps, no explicit waits.
-- **No stale references** — the element id is re-resolved on each call;
-  `StaleElementReferenceException` cannot happen.
+- **Fresh references** — the element id is re-resolved on each command,
+  including retries.
 - **Auto teardown** — the driver session is a lazy singleton closed by its
   destructor when the process exits; call `closeWebDriver()` to close it early
   (the next `open`/`$` lazily starts a fresh session).
-- **Fluent conditions** — `be::visible/hidden/enabled/checked/exist`,
-  `have::text/exactText/attr/value`; collections get
-  `have::size/sizeGreaterThan/texts`.
+- **Fluent conditions** — `be::visible/checked`, `have::text/exactText`;
+  collections get `have::size`.
 
 ## Dependencies
 
@@ -46,7 +45,7 @@ $$("input[type=checkbox]").shouldHave(have::size(2));
 - `libcurl` (system on macOS/Linux)
 - [`nlohmann/json`](https://github.com/nlohmann/json) — `find_package` or
   fetched automatically by CMake
-- `chromedriver` (or geckodriver — point `Configuration::webdriverUrl` at it)
+- `chromedriver` (point `Configuration::webdriverUrl` at it)
 
 ## Use it as a dependency
 
@@ -59,7 +58,7 @@ target, header + transitive deps (`CURL`, `nlohmann_json`) resolved for you.
 include(FetchContent)
 FetchContent_Declare(selenide
     GIT_REPOSITORY https://github.com/qa-guru/selenide-cpp.git
-    GIT_TAG v0.1.0)
+    GIT_TAG v0.1.2)
 FetchContent_MakeAvailable(selenide)
 
 target_link_libraries(my_tests PRIVATE selenide::selenide)
@@ -113,27 +112,24 @@ consuming this library via `FetchContent`.
 
 ```cpp
 // browser
-open(url)                        // GET /session/{id}/url
+open(url)                        // POST /session/{id}/url
 closeWebDriver()                 // DELETE /session — next call opens a fresh browser
-title()                          // page title
 execute(script, args)            // /execute/sync — JS, returns nlohmann::json
 screenshot(path)                 // viewport PNG
-alertText() / acceptAlert() / dismissAlert()
 
 // elements
 $(css)  $(css, i)  $$(css)
-el.find(css)  el.get(i)
 el.click()  el.setValue(v)       // clear + sendKeys
-el.text()  el.attr(name)  el.displayed()  el.enabled()  el.selected()  el.exists()
+el.text()  el.displayed()  el.selected()
 
 // assertions — all retry until Configuration::timeout
-el.shouldBe(c) / shouldHave(c) / shouldNotBe(c) / shouldNotHave(c)
+el.shouldBe(c) / shouldHave(c)
 els.shouldHave(colCondition)
 
 // conditions
-be::exist visible hidden enabled checked
-have::text(t) exactText(t) attr(n, v) value(v)
-have::size(n) sizeGreaterThan(n) texts({...})
+be::visible checked
+have::text(t) exactText(t)
+have::size(n)
 
 // configuration (static fields, like Selenide's Configuration)
 selenide::Configuration::webdriverUrl = "http://127.0.0.1:9515";
@@ -148,26 +144,20 @@ selenide::Configuration::pollingInterval = std::chrono::milliseconds{200};
 | Selenide-style call | W3C WebDriver |
 |---|---|
 | `$(css)` → resolve | `POST /session/{id}/element` (css selector) |
-| `$$(css)` / `.get(i)` | `POST .../elements` |
-| `.find(css)` | `POST /element/{id}/element` |
+| `$$(css)` / `$(css, i)` | `POST .../elements` |
 | `.click()` | `POST /element/{id}/click` |
 | `.setValue()` | `POST /element/{id}/clear` + `.../value` |
 | `.text()` | `GET /element/{id}/text` |
-| `displayed/enabled/selected` | `GET /element/{id}/displayed|enabled|selected` |
+| `displayed/selected` | `GET /element/{id}/displayed|selected` |
 | `screenshot()` | `GET /screenshot` |
 | `execute()` | `POST /execute/sync` |
-| alerts | `GET /alert/text`, `POST /alert/accept|dismiss` |
-
-`unhandledPromptBehavior: ignore` is set on session creation, so
-`window.confirm` stays open until you accept/dismiss it explicitly.
 
 ## Deliberate limits (vs real Selenide)
 
 - CSS selectors only (add more `using` strategies if you need xpath)
 - no page-load / download waiting helpers, no iframe or window switching
 - no Page Objects, no proxy/CDP network interception
-- runner integration is just `main()` — wrap `should*` failures in your
-  framework's `ASSERT_*` if you want per-test reports
+- assertions throw `std::runtime_error` on timeout; use with your test runner
 
 ## License
 
